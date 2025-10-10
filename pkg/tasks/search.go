@@ -144,6 +144,12 @@ func SearchIndex() {
 			}
 			tlog.Infof("Indexed %v/%v scenes", current, total)
 
+			// Update migration status if migration is running
+			if config.State.Migration.IsRunning {
+				msg := fmt.Sprintf("Reindexing scenes: %v/%v", current, total)
+				config.UpdateMigrationStatus(config.State.Migration.Current, current, total, msg)
+			}
+
 			offset = offset + 100
 		}
 
@@ -191,6 +197,42 @@ func IndexScenes(scenes *[]models.Scene) {
 			} else {
 				// log.Debugln("Indexed " + scene.SceneID)
 				total += 1
+			}
+		}
+
+		idx.Bleve.Close()
+
+		tlog.Infof("Indexed %v scenes", total)
+	}
+}
+
+func DeleteIndexScenes(scenes *[]models.Scene) {
+	if !models.CheckLock("index") {
+		models.CreateLock("index")
+		defer models.RemoveLock("index")
+
+		tlog := log.WithFields(logrus.Fields{"task": "scrape"})
+
+		idx, err := NewIndex("scenes")
+		if err != nil {
+			log.Error(err)
+			models.RemoveLock("index")
+			return
+		}
+
+		tlog.Infof("Deleting scenes from search index...")
+
+		total := 0
+		lastMessage := time.Now()
+		for i := range *scenes {
+			if time.Since(lastMessage) > time.Duration(config.Config.Advanced.ProgressTimeInterval)*time.Second {
+				tlog.Infof("Deleting scene index %v of %v scenes", total, len(*scenes))
+				lastMessage = time.Now()
+			}
+			scene := (*scenes)[i]
+			if idx.Exist(scene.SceneID) {
+				// Remove old index, as data may have been updated
+				idx.Bleve.Delete(scene.SceneID)
 			}
 		}
 

@@ -54,11 +54,20 @@ func (i *RequestSceneList) ToJSON() string {
 	return string(b)
 }
 
+// getVRPornSlugToIDMap returns the hardcoded slug-to-ID mapping
+func getVRPornSlugToIDMap() (map[string]string, error) {
+	return getVRPornSlugToID(), nil
+}
+
 func Migrate() {
+	tlog := common.Log.WithField("task", "migration")
+	tlog.Info("Starting database migrations...")
+	config.State.Migration.IsRunning = true
+
 	var retryMigration []string
 	db, _ := models.GetDB()
 
-	m := gormigrate.New(db, gormigrate.DefaultOptions, []*gormigrate.Migration{
+	migrations := []*gormigrate.Migration{
 		{
 			ID: "0001",
 			Migrate: func(tx *gorm.DB) error {
@@ -2340,21 +2349,149 @@ func Migrate() {
 				return nil
 			},
 		},
-	})
+		{
+			ID: "0086-update-vrporn-ids",
+			Migrate: func(tx *gorm.DB) error {
+				common.Log.Info("Running migration 0086-update-vrporn-ids to convert VRPorn Scene Ids, this may take a while, check for completion message")
+
+				// Load the hardcoded slug-to-ID mapping
+				slugToID, err := getVRPornSlugToIDMap()
+				if err != nil {
+					common.Log.Errorf("Migration 0086-update-vrporn-ids failed to load slug-to-ID mapping: %v", err)
+					return err
+				}
+				common.Log.Infof("Migration 0086-update-vrporn-ids loaded %d slug-to-ID mappings", len(slugToID))
+
+				var scenes []models.Scene
+				var deleteSceneList []models.Scene
+				err = tx.Where("scene_id like 'vrporn-%'").Find(&scenes).Error
+				if err != nil {
+					return err
+				}
+				reindexRequired := false
+				for cnt, scene := range scenes {
+					// check if the scene has the old id, ie vrporn-9999999, new id has a guid eg vrporn-dd46fb64-8739-11f0-bcbc-17646356a97f
+					if strings.Count(scene.SceneID, "-") == 1 {
+						slug := path.Base(scene.SceneURL)
+
+						// Look up the new ID from the hardcoded mapping
+						newID, found := slugToID["/"+slug+"/"]
+						if !found {
+							common.Log.Infof("VRPorn %s (%s) - site deleted this scene", scene.SceneID, slug)
+						} else {
+							sceneID := "vrporn-" + newID
+							if scene.SceneID != sceneID {
+								deleteSceneList = append(deleteSceneList, scene)
+								params := models.TrailerScrape{SceneUrl: "https://vrporn.com/proxy/api/content/v1/post/" + slug}
+								strParams, _ := json.Marshal(params)
+								scene.TrailerType = "vrporn"
+								scene.TrailerSource = string(strParams)
+								scene.Save()
+								MigrationRenameSceneId(tx, scene, sceneID, 1)
+								reindexRequired = true
+							}
+						}
+					}
+					if cnt%10 == 0 {
+						msg := fmt.Sprintf("Migration 0086-update-vrporn-ids has migrated %v scenes of %v", cnt+1, len(scenes))
+						config.UpdateMigrationStatus("0086-update-vrporn-ids", cnt+1, len(scenes), msg)
+						// Only log every 100 to reduce console spam
+						if cnt%100 == 0 {
+							common.Log.WithField("task", "migration").Infof(msg)
+						}
+					}
+				}
+				if reindexRequired {
+					config.UpdateMigrationStatus("0086-update-vrporn-ids", len(scenes), len(scenes), "Reindexing scenes...")
+					common.Log.Info("Migration 0086-update-vrporn-ids reindexing scenes...")
+					tasks.DeleteIndexScenes(&deleteSceneList) // remove the old scene id entries
+					tasks.SearchIndex()
+				}
+				common.Log.Info("Migration 0086-update-vrporn-ids has completed")
+				return nil
+			},
+		},
+	}
+
+	// Wrap migrations to automatically track progress
+	totalMigrations := len(migrations)
+	wrappedMigrations := make([]*gormigrate.Migration, len(migrations))
+	for i, migration := range migrations {
+		currentIndex := i
+		originalMigrate := migration.Migrate
+		wrappedMigrations[i] = &gormigrate.Migration{
+			ID: migration.ID,
+			Migrate: func(tx *gorm.DB) error {
+				// Update status before running migration
+				msg := fmt.Sprintf("Running migration %s", migrations[currentIndex].ID)
+				tlog.Infof(msg)
+				config.UpdateMigrationStatus(migrations[currentIndex].ID, currentIndex+1, totalMigrations, msg)
+
+				// Run the actual migration
+				return originalMigrate(tx)
+			},
+		}
+	}
+
+	m := gormigrate.New(db, gormigrate.DefaultOptions, wrappedMigrations)
 
 	if err := m.Migrate(); err != nil {
-		common.Log.Fatalf("Could not migrate: %v", err)
+		tlog.Fatalf("Could not migrate: %v", err)
 	}
 	if len(retryMigration) > 0 {
 		for _, migration := range retryMigration {
-			common.Log.Warnf("*** MIGRATION WARNING ***: Could not migrate: '%v', this migration will retry the next time XBVR is started", migration)
+			tlog.Warnf("*** MIGRATION WARNING ***: Could not migrate: '%v', this migration will retry the next time XBVR is started", migration)
 			err := db.Exec("DELETE FROM migrations WHERE id = ?", migration).Error
 			if err != nil {
-				common.Log.Fatalf("Failed to remove %v from the miigration table - will not be retried", err)
+				tlog.Fatalf("Failed to remove %v from the miigration table - will not be retried", err)
 			}
 		}
 	}
-	common.Log.Printf("Migration did run successfully")
+	tlog.Info("Database migrations completed successfully")
+	config.CompleteMigration()
 
 	db.Close()
+}
+
+func MigrationRenameSceneId(tx *gorm.DB, scene models.Scene, newSceneID string, version int) error {
+	// Common function to rename a scene id, if database changes require this function to do additional processing, use a new version
+	// to maintain backwards compatibility
+
+	if scene.SceneID == newSceneID {
+		return nil
+	}
+	switch version {
+	case 1:
+		scene.LegacySceneID = scene.SceneID
+		// update all actions referring to this scene by its scene_id
+		err := tx.Model(&models.Action{}).Where("scene_id = ?", scene.SceneID).Update("scene_id", newSceneID).Error
+		if err != nil {
+			return err
+		}
+
+		// rename preview if it exists
+		if scene.HasVideoPreview {
+			err := os.Rename(filepath.Join(common.VideoPreviewDir, scene.SceneID+".mp4"), filepath.Join(common.VideoPreviewDir, newSceneID+".mp4"))
+			if err != nil {
+				common.Log.Warnf("Could not update preview %s", scene.SceneID)
+			}
+		}
+
+		// update scene id where other sites (stashdb or vrporn is the master site) link to the scene
+		err = tx.Exec(`update external_reference_links set internal_name_id = '` + newSceneID + `' where internal_table = 'scenes' and internal_name_id = '` + scene.SceneID + `'`).Error
+		if err != nil {
+			return nil
+		}
+
+		// update the scene itself
+		scene.SceneID = newSceneID
+		err = tx.Save(&scene).Error
+		if err != nil {
+			return err
+		}
+
+	case 2:
+		// add code for version 2
+	}
+	return nil
 }
