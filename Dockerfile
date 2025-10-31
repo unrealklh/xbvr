@@ -1,12 +1,12 @@
-FROM node:20 as build-env
+FROM node:22 AS build-env
 
 ### Install Go ###
 ARG TARGETPLATFORM
 ARG RELVER
 ARG vcs-ref
-ENV GO_VERSION=1.24.4 \
-    GOPATH=$HOME/go-packages \
-    GOROOT=$HOME/go
+ENV GO_VERSION=1.24.5 \
+    GOPATH=/go-packages \
+    GOROOT=/go
 ENV PATH=$GOROOT/bin:$GOPATH/bin:$PATH
 RUN if [ "$TARGETPLATFORM" = "linux/arm/v6" ]; then curl -fsSL https://dl.google.com/go/go$GO_VERSION.linux-armv6l.tar.gz | tar -xzv ; \
     elif [ "$TARGETPLATFORM" = "linux/arm/v7" ]; then curl -fsSL https://dl.google.com/go/go$GO_VERSION.linux-armv6l.tar.gz  | tar -xzv ; \
@@ -21,7 +21,7 @@ RUN cd /app && \
     go generate && \
     go build -tags='json1' -ldflags "-w -X main.version=$RELVER -X main.commit=$vcs-ref" -o xbvr main.go
 
-FROM gcr.io/distroless/base-debian12:debug as debug
+FROM gcr.io/distroless/base-debian12:debug AS debug
 COPY --from=build-env /app/xbvr /
 
 EXPOSE 9998-9999
