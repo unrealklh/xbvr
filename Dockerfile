@@ -5,8 +5,9 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 
 COPY xbvr /usr/bin/xbvr
+COPY xbvr_data/ /tmp/xbvr_data/
 
 EXPOSE 9998-9999
 VOLUME /root/.config/
 
-CMD ["/usr/bin/xbvr"]
+CMD ["sh", "-c", "mv /tmp/xbvr_data /root/.config/xbvr/xbvr_data ; /usr/bin/xbvr"]
