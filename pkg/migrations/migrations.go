@@ -2368,7 +2368,7 @@ func Migrate() {
 					return err
 				}
 
-				err = RenameSceneIdsFromFile(tx, 1, "0086-update-vrporn-ids", scenes, customConverter, nil)
+				err = RenameSceneIdsFromFile(tx, 1, "0086-update-vrporn-ids", "0086-update-vrporn-ids.json", scenes, false, customConverter, nil)
 				if err != nil {
 					return err
 				}
@@ -2419,10 +2419,48 @@ func Migrate() {
 	db.Close()
 }
 
-func RenameSceneIdsFromFile(tx *gorm.DB, version int, migration string, scenes []models.Scene, customConverter func(*models.Scene), sceneLookup func(string) models.Scene) error {
-	fName := filepath.Join(common.AppDir, "xbvr_data", "release", migration+".json")
+func ProcessCustomSceneRemappingFiles() {
+	dirName := filepath.Join(common.AppDir, "xbvr_data", "migrations", "custom")
+	entries, err := os.ReadDir(dirName)
+	if err != nil {
+		return
+	}
+
+	db, _ := models.GetDB()
+	for _, e := range entries {
+		fName := filepath.Join(common.AppDir, "xbvr_data", "migrations", "custom", e.Name())
+		b, err := os.ReadFile(fName)
+		if err == nil {
+			jsonData := string(b)
+			var data map[string]interface{}
+			if err := json.Unmarshal(b, &data); err == nil {
+				isCustom, _ := data["custom_mappings"].(bool)
+				if isCustom {
+					processed, _ := data["processed"].(bool)
+					if !processed {
+						err = RenameSceneIdsFromFile(db, 1, "Custom Scene Mapping", e.Name(), nil, gjson.Get(jsonData, "flag_scene_for_rescrape").Bool(), nil, nil)
+						if err == nil {
+							data["processed"] = true
+							b, err := json.MarshalIndent(data, "", "  ")
+							if err == nil {
+								os.WriteFile(fName, b, 0644)
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+}
+func RenameSceneIdsFromFile(tx *gorm.DB, version int, migration string, filename string, scenes []models.Scene, needs_update bool, customConverter func(*models.Scene), sceneLookup func(string) models.Scene) error {
+	fName := filepath.Join(common.AppDir, "xbvr_data", "migrations", "custom", filename)
+
+	// if a custom version of the file exists, use that one first
 	if _, err := os.Stat(fName); os.IsNotExist(err) {
-		return errors.New("Mapping file " + migration + ".json not found")
+		fName = filepath.Join(common.AppDir, "xbvr_data", "migrations", "release", filename)
+		if _, err := os.Stat(fName); os.IsNotExist(err) {
+			return errors.New("Mapping file " + filename + " not found")
+		}
 	}
 	reindexRequired := false
 	var deleteSceneList []models.Scene
@@ -2471,7 +2509,7 @@ func RenameSceneIdsFromFile(tx *gorm.DB, version int, migration string, scenes [
 			if !exists {
 				mapping = mappingsMap[scene.SceneURL]
 			}
-			MigrationRenameSceneId(tx, scene, mapping.newId, mapping.newUrl, version, customConverter)
+			MigrationRenameSceneId(tx, scene, mapping.newId, mapping.newUrl, version, needs_update, customConverter)
 			deleteSceneList = append(deleteSceneList, scene)
 			reindexRequired = true
 
@@ -2507,7 +2545,7 @@ func RenameSceneIdsFromFile(tx *gorm.DB, version int, migration string, scenes [
 			}
 
 			if err == nil && scene.ID != 0 {
-				MigrationRenameSceneId(tx, scene, sceneMapping.Get("newId").String(), sceneMapping.Get("newUrl").String(), version, customConverter)
+				MigrationRenameSceneId(tx, scene, sceneMapping.Get("newId").String(), sceneMapping.Get("newUrl").String(), version, needs_update, customConverter)
 				deleteSceneList = append(deleteSceneList, scene)
 				reindexRequired = true
 			}
@@ -2527,20 +2565,29 @@ func RenameSceneIdsFromFile(tx *gorm.DB, version int, migration string, scenes [
 	return nil
 }
 
-func MigrationRenameSceneId(tx *gorm.DB, scene models.Scene, newSceneID string, newSceneUrl string, version int, customConverter func(*models.Scene)) error {
+func MigrationRenameSceneId(tx *gorm.DB, scene models.Scene, newSceneID string, newSceneUrl string, version int, needs_update bool, customConverter func(*models.Scene)) error {
 	// Common function to rename a scene id, if database changes require this function to do additional processing, use a new version
 	// to maintain backwards compatibility
 
 	// Use customConverter to pass a function to make additional changes to the scene specific to your migration,
 	// 	 eg trailers or to flag scenes to be rescraped, optional can be nil
 
+	// check we need to change something
+	if newSceneID == "" && newSceneUrl == "" {
+		return nil
+	}
+	if newSceneID != "" && scene.SceneID == newSceneID {
+		return nil
+	}
+	if newSceneID == "" && newSceneUrl != "" && scene.SceneURL == newSceneUrl {
+		return nil
+	}
+
+	scene.NeedsUpdate = needs_update
 	if newSceneID == "" && newSceneUrl != "" {
 		// we just want a new url
 		scene.SceneURL = newSceneUrl
 		scene.Save()
-		return nil
-	}
-	if scene.SceneID == newSceneID {
 		return nil
 	}
 

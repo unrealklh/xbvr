@@ -60,6 +60,7 @@ func StartServer(version, commit, branch, date string) {
 	go func() {
 		config.State.Migration.IsRunning = true
 		migrations.Migrate()
+		migrations.ProcessCustomSceneRemappingFiles()
 		config.CompleteMigration()
 	}()
 
