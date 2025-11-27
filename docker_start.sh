@@ -19,6 +19,6 @@ if [ ! -d "$TARGET_DIR" ]; then
 fi
 
 # Copy recursively from /tmp/data to the target directory
-cp -ru /tmp/xbvr_data /root/.config/xbvr/xbvr_data
+cp -ru /tmp/xbvr_data /root/.config/xbvr
 
 /usr/bin/xbvr
