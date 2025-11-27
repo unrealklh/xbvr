@@ -2367,7 +2367,9 @@ func Migrate() {
 				if err != nil {
 					return err
 				}
-
+				if len(scenes) == 0 {
+					return nil
+				}
 				err = RenameSceneIdsFromFile(tx, 1, "0086-update-vrporn-ids", "0086-update-vrporn-ids.json", scenes, false, customConverter, nil)
 				if err != nil {
 					return err

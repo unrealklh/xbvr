@@ -4,7 +4,7 @@
 # and then startes xbvr
 
 TARGET_DIR="/root/.config/xbvr/xbvr_data/migrations/release"
-SOURCE_DIR="/tmp/data"
+SOURCE_DIR="/tmp/xbvr_data"
 
 # Check if target directory exists
 if [ ! -d "$TARGET_DIR" ]; then
