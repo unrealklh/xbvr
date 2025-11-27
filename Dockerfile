@@ -6,8 +6,10 @@ RUN apt-get update && \
 
 COPY xbvr /usr/bin/xbvr
 COPY xbvr_data/ /tmp/xbvr_data/
+COPY docker_start.sh /
+RUN chmod 777 /docker_start.sh
 
 EXPOSE 9998-9999
 VOLUME /root/.config/
 
-CMD ["sh", "-c", "mv /tmp/xbvr_data /root/.config/xbvr/xbvr_data ; /usr/bin/xbvr"]
+CMD ["/docker_start.sh"]
