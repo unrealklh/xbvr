@@ -1,6 +1,9 @@
 #!/bin/bash
+# this script is used to start xbvr in docker environments
+# it copies release files from /tmp in the docker image to the exported app directory
+# and then startes xbvr
 
-TARGET_DIR="/root/.config/test/data"
+TARGET_DIR="/root/.config/xbvr/xbvr_data/release"
 SOURCE_DIR="/tmp/data"
 
 # Check if target directory exists
@@ -11,10 +14,10 @@ fi
 
 # Copy recursively from /tmp/data to the target directory
 if [ -d "$SOURCE_DIR" ]; then
-    cp -r "$SOURCE_DIR/"* "$TARGET_DIR/"
+    cp -ru "$SOURCE_DIR/"* "$TARGET_DIR/"
 fi
 
-TARGET_DIR="/root/.config/test/data/custom"
+TARGET_DIR="/root/.config/xbvr/xbvr_data/custom"
 if [ ! -d "$TARGET_DIR" ]; then
     mkdir -p "$TARGET_DIR"
     chmod 777 "$TARGET_DIR"
