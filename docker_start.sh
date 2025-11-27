@@ -12,15 +12,13 @@ if [ ! -d "$TARGET_DIR" ]; then
     chmod 777 "$TARGET_DIR"
 fi
 
-# Copy recursively from /tmp/data to the target directory
-if [ -d "$SOURCE_DIR" ]; then
-    cp -ru "$SOURCE_DIR/"* "$TARGET_DIR/"
-fi
-
 TARGET_DIR="/root/.config/xbvr/xbvr_data/migrations/custom"
 if [ ! -d "$TARGET_DIR" ]; then
     mkdir -p "$TARGET_DIR"
     chmod 777 "$TARGET_DIR"
 fi
+
+# Copy recursively from /tmp/data to the target directory
+cp -ru /tmp/xbvr_data /root/.config/xbvr/xbvr_data
 
 /usr/bin/xbvr
