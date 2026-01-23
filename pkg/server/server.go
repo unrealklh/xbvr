@@ -53,14 +53,18 @@ func StartServer(version, commit, branch, date string) {
 	common.CurrentVersion = version
 
 	config.LoadConfig()
+	common.CopyXbvrData()
 
 	// Remove old locks
 	models.RemoveAllLocks()
 
+	migrations.Migrate("0024-drop-actions-old")
+
 	// Run migrations in background
 	go func() {
 		config.State.Migration.IsRunning = true
-		migrations.Migrate()
+		migrations.ProcessCustomSceneRemappingFiles()
+		migrations.Migrate("")
 		config.CompleteMigration()
 	}()
 
