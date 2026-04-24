@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6.02
         with:
           fetch-depth: 0 # Essential for getting full Git history and all tags
 
@@ -117,7 +117,7 @@ jobs:
           prerelease: false
 
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
+        uses: docker/setup-qemu-action@v4
 
       - name: Build UI
         run:  cd ui && yarn install --ignore-engines && yarn build
