@@ -78,6 +78,7 @@ type RequestSaveOptionsAdvanced struct {
 	LinkScenesAfterSceneScraping bool      `json:"linkScenesAfterSceneScraping"`
 	UseAltSrcInFileMatching      bool      `json:"useAltSrcInFileMatching"`
 	UseAltSrcInScriptFilters     bool      `json:"useAltSrcInScriptFilters"`
+	AutoLimitScraping            bool      `json:"autoLimitScraping"`
 	IgnoreReleasedBefore         time.Time `json:"ignoreReleasedBefore"`
 }
 
@@ -427,13 +428,30 @@ func (i ConfigResource) listSitesWithDB(req *restful.Request, resp *restful.Resp
 		db.Order("name COLLATE NOCASE asc").Find(&sites)
 	}
 
+	// Get all scene counts in a single query instead of N queries
+	type SceneCount struct {
+		ScraperID string
+		Count     int
+	}
+	var sceneCounts []SceneCount
+	db.Model(&models.Scene{}).Select("scraper_id, count(*) as count").Group("scraper_id").Scan(&sceneCounts)
+
+	// Build a map for fast lookup
+	countMap := make(map[string]int)
+	for _, sc := range sceneCounts {
+		countMap[sc.ScraperID] = sc.Count
+	}
+
+	// Build a set of scraper IDs for O(1) lookup
 	scrapers := models.GetScrapers()
+	scraperSet := make(map[string]bool)
+	for _, scraper := range scrapers {
+		scraperSet[scraper.ID] = true
+	}
+
 	for idx, site := range sites {
-		for _, scraper := range scrapers {
-			if site.ID == scraper.ID {
-				sites[idx].HasScraper = true
-			}
-		}
+		sites[idx].HasScraper = scraperSet[site.ID]
+		sites[idx].SceneCount = countMap[site.ID]
 	}
 	resp.WriteHeaderAndEntity(http.StatusOK, sites)
 }
@@ -533,6 +551,7 @@ func (i ConfigResource) saveOptionsAdvanced(req *restful.Request, resp *restful.
 	config.Config.Advanced.LinkScenesAfterSceneScraping = r.LinkScenesAfterSceneScraping
 	config.Config.Advanced.UseAltSrcInFileMatching = r.UseAltSrcInFileMatching
 	config.Config.Advanced.UseAltSrcInScriptFilters = r.UseAltSrcInScriptFilters
+	config.Config.Advanced.AutoLimitScraping = r.AutoLimitScraping
 	config.Config.Advanced.IgnoreReleasedBefore = r.IgnoreReleasedBefore
 	config.SaveConfig()
 
@@ -730,6 +749,15 @@ func (i ConfigResource) forceSiteUpdate(req *restful.Request, resp *restful.Resp
 	defer db.Close()
 
 	db.Model(&models.Scene{}).Where("scraper_id = ?", r.ScraperId).Update("needs_update", true)
+
+	// Disable limit scraping when forcing update to allow full re-scrape
+	var site models.Site
+	if err := db.Where(&models.Site{ID: r.ScraperId}).First(&site).Error; err == nil {
+		if site.LimitScraping {
+			site.LimitScraping = false
+			site.Save()
+		}
+	}
 }
 
 func (i ConfigResource) deleteScenes(req *restful.Request, resp *restful.Response) {
@@ -757,6 +785,13 @@ func (i ConfigResource) deleteScenes(req *restful.Request, resp *restful.Respons
 	}
 
 	db.Where("scraper_id = ?", r.ScraperId).Delete(&models.Scene{})
+
+	// Disable limit scraping when deleting scenes to allow full re-scrape
+	var site models.Site
+	if err := db.Where(&models.Site{ID: r.ScraperId}).First(&site).Error; err == nil {
+		site.LimitScraping = false
+		site.Save()
+	}
 }
 
 func (i ConfigResource) getState(req *restful.Request, resp *restful.Response) {

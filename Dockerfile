@@ -23,6 +23,11 @@ RUN cd /app && \
 
 FROM gcr.io/distroless/base-debian12:debug AS debug
 COPY --from=build-env /app/xbvr /
+#COPY xbvr /usr/bin/xbvr
+# place data next to the executable like other platforms
+#COPY xbvr_data/ /usr/bin/xbvr_data/
+#COPY docker_start.sh /
+#RUN chmod 777 /docker_start.sh
 
 EXPOSE 9998-9999
 VOLUME /root/.config/
