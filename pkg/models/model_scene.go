@@ -63,7 +63,7 @@ type Scene struct {
 	SceneID         string    `gorm:"index" json:"scene_id" xbvrbackup:"scene_id"`
 	Title           string    `json:"title" sql:"type:varchar(1024);" xbvrbackup:"title"`
 	SceneType       string    `json:"scene_type" xbvrbackup:"scene_type"`
-	ScraperId       string    `json:"scraper_id" xbvrbackup:"scraper_id"`
+	ScraperId       string    `gorm:"index" json:"scraper_id" xbvrbackup:"scraper_id"`
 	Studio          string    `json:"studio" xbvrbackup:"studio"`
 	Site            string    `json:"site" xbvrbackup:"site"`
 	Tags            []Tag     `gorm:"many2many:scene_tags;" json:"tags" xbvrbackup:"tags"`
@@ -922,8 +922,8 @@ func queryScenes(db *gorm.DB, r RequestSceneList) (*gorm.DB, *gorm.DB) {
 			where = "is_scripted = 1"
 		case "Is Favourite":
 			where = "scenes.favourite = 1"
-		case "Is Accessible":
-			where = "scenes.is_accessible = 1"
+		case "Missing":
+			where = "scenes.is_accessible = 0"
 		case "Is Passthrough":
 			where = "(chroma_key <> '' or exists (select 1 from files where files.scene_id = scenes.id and files.`type` = 'video' and files.has_alpha = true))"
 		case "Is Alpha Passthrough":
