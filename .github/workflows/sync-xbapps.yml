@@ -23,7 +23,7 @@ jobs:
       # Step 2: run this sync action - specify the upstream repo, upstream branch to sync with, and target sync branch
       - name: Pull (Fast-Forward) upstream changes
         id: sync
-        uses: aormsby/Fork-Sync-With-Upstream-action@v3.4
+        uses: aormsby/Fork-Sync-With-Upstream-action@v3.4.3
         with:
           upstream_sync_repo: xbapps/xbvr
           upstream_sync_branch: master
@@ -45,7 +45,7 @@ jobs:
           ref: master
       - name: Find Tag
         id: tagger
-        uses: jimschubert/query-tag-action@v2
+        uses: jimschubert/query-tag-action@v2.2
         with:
           exclude: '*beta*'
 #          include: '0.3.*'
